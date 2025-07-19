@@ -7,6 +7,7 @@ variable "aws_region" {
 variable "aurora_master_username" {
   description = "Aurora master username"
   type        = string
+  default = "admin"
 }
 
 variable "aurora_master_password" {
@@ -18,13 +19,13 @@ variable "aurora_master_password" {
 variable "aurora_min_capacity" {
   description = "Aurora min capacity"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "aurora_max_capacity" {
   description = "Aurora max capacity"
   type        = number
-  default     = 8
+  default     = 2
 }
 
 variable "aurora_auto_pause_seconds" {
@@ -36,9 +37,11 @@ variable "aurora_auto_pause_seconds" {
 variable "s3_bucket_name" {
   description = "S3 bucket name for Lambda access"
   type        = string
+  default     = "serverless-batch-classifier-bucket"
 }
 
 variable "lambda_image_uri" {
   description = "ECR image URI for Lambda"
   type        = string
+  default = "public.ecr.aws/x9j8b9e7/serverless-batch-classifier/lambda:latest"
 }

@@ -4,18 +4,17 @@ provider "aws" {
  
 resource "aws_rds_cluster" "aurora_serverless" {
   cluster_identifier      = "aurora-serverless-cluster"
-  engine                 = "aurora-mysql"
-  engine_mode            = "serverless"
-  master_username        = var.aurora_master_username
-  master_password        = var.aurora_master_password
+  engine                  = "aurora-mysql"
+  # Remove engine_mode for Aurora Serverless v2
+  master_username         = var.aurora_master_username
+  master_password         = var.aurora_master_password
   backup_retention_period = 1
-  skip_final_snapshot    = true
+  skip_final_snapshot     = true
 
-  scaling_configuration {
-    auto_pause             = true
-    min_capacity           = var.aurora_min_capacity
-    max_capacity           = var.aurora_max_capacity
-    seconds_until_auto_pause = var.aurora_auto_pause_seconds
+  # Aurora Serverless V2 requires `serverlessv2_scaling_configuration`
+  serverlessv2_scaling_configuration {
+    min_capacity = var.aurora_min_capacity
+    max_capacity = var.aurora_max_capacity
   }
 }
 
@@ -52,12 +51,27 @@ resource "aws_iam_role_policy" "lambda_s3_policy" {
     }]
   })
 }
+
+resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  role       = aws_iam_role.lambda_exec_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
 resource "aws_lambda_function" "main_lambda" {
   function_name = "main_lambda"
   package_type  = "Image"
   image_uri     = var.lambda_image_uri
   role          = aws_iam_role.lambda_exec_role.arn
   timeout       = 60
+  
+  # Specify architecture for container images
+  architectures = ["x86_64"]
+  
+  # Add environment variables if needed
+  environment {
+    variables = {
+      LOG_LEVEL = "INFO"
+    }
+  }
 }
 
 resource "aws_api_gateway_rest_api" "api" {
