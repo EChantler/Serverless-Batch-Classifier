@@ -20,15 +20,16 @@ jobs:
           aws-access-key-id: "${{ secrets.AWS_ACCESS_KEY_ID }}"
           aws-secret-access-key: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
           aws-region: "${{ secrets.AWS_REGION }}"
-          
-      - name: Login to Amazon ECR Public 
-        run: |
-          aws ecr-public get-login-password --region us-east-1 \
-            | docker login --username AWS \
-              --password-stdin public.ecr.aws/x9j8b9e7
 
-      - name: Build and push Docker image to Public ECR
+      - name: Login to Amazon ECR
         run: |
-          docker build -t batch-classifier/lambda fastapi_lambda
-          docker tag batch-classifier/lambda:latest public.ecr.aws/x9j8b9e7/batch-classifier/lambda:latest
-          docker push public.ecr.aws/x9j8b9e7/batch-classifier/lambda:latest
+          aws ecr get-login-password --region us-east-1 \
+            | docker login --username AWS \
+              --password-stdin 262435403757.dkr.ecr.us-east-1.amazonaws.com
+
+      - name: Build and push Docker image to ECR
+        run: |
+          docker build -t 262435403757.dkr.ecr.us-east-1.amazonaws.com/batch-classifier:${{ github.sha }} fastapi_lambda
+          docker tag 262435403757.dkr.ecr.us-east-1.amazonaws.com/batch-classifier:${{ github.sha }} 262435403757.dkr.ecr.us-east-1.amazonaws.com/batch-classifier:latest
+          docker push 262435403757.dkr.ecr.us-east-1.amazonaws.com/batch-classifier:${{ github.sha }}
+          docker push 262435403757.dkr.ecr.us-east-1.amazonaws.com/batch-classifier:latest

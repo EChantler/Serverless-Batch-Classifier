@@ -43,5 +43,5 @@ variable "s3_bucket_name" {
 variable "lambda_image_uri" {
   description = "ECR image URI for Lambda"
   type        = string
-  default = "public.ecr.aws/x9j8b9e7/serverless-batch-classifier/lambda:latest"
+  default = "262435403757.dkr.ecr.us-east-1.amazonaws.com/batch-classifier:latest"
 }
