@@ -21,20 +21,13 @@ jobs:
           aws-secret-access-key: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
           aws-region: "${{ secrets.AWS_REGION }}"
 
-      - name: Login to Amazon ECR
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets['AWS_ACCESS_KEY_ID'] }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets['AWS_SECRET_ACCESS_KEY'] }}
-          AWS_REGION: ${{ secrets['AWS_REGION'] }}
+      - name: Login to Amazon ECR Public
         run: |
-          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets['AWS_ACCOUNT_ID'] }}.dkr.ecr.$AWS_REGION.amazonaws.com
+          aws ecr-public get-login-password --region ${{ secrets.AWS_REGION }} \
+            | docker login --username AWS \
+              --password-stdin public.ecr.aws
 
-      - name: Build and push Docker image
-        env:
-          AWS_ACCOUNT_ID: ${{ secrets['AWS_ACCOUNT_ID'] }}
-          AWS_REGION: ${{ secrets['AWS_REGION'] }}
-          ECR_REPOSITORY: ${{ secrets['ECR_REPOSITORY'] }}
+      - name: Build and push Docker image to Public ECR
         run: |
-          docker build -t $ECR_REPOSITORY:latest fastapi_lambda
-          docker tag $ECR_REPOSITORY:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:${{ github.sha }}
-          docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:${{ github.sha }}
+          docker build -t "${{ secrets.PUBLIC_ECR_REPOSITORY }}:${{ github.sha }}" fastapi_lambda
+          docker push "${{ secrets.PUBLIC_ECR_REPOSITORY }}:${{ github.sha }}"
