@@ -1,16 +1,12 @@
-# Dockerfile for FastAPI application
-FROM python:3.9-slim
-
-# Set working directory
-WORKDIR /app
+# Dockerfile for Lambda FastAPI application
+FROM public.ecr.aws/lambda/python:3.9
 
 # Copy requirements and install
-COPY requirements.txt .
+COPY requirements.txt ${LAMBDA_TASK_ROOT}
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY . ${LAMBDA_TASK_ROOT}
 
-# Expose port and run Uvicorn
-EXPOSE 80
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "80"]
+# Set the CMD to your handler
+CMD ["app.handler"]
