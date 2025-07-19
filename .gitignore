@@ -1,0 +1,66 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+dist/
+*.egg-info/
+wheels/
+*.egg
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+.pytest_cache/
+cover/
+coverage.xml
+*,cover
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Virtual environment folders
+env/
+venv/
+ENV/
+.venv/
+
+# IDE/editor folders
+.vscode/
+.idea/
+
+# AWS credentials and config
+*.pem
+.aws/
+
+# Terraform state files
+infrastructure/terraform/.terraform/
+infrastructure/terraform/terraform.tfstate
+infrastructure/terraform/terraform.tfstate.backup
+
+# MLflow runs
+mlruns/
+
+# Model artifacts
+*.h5
+
+# Data directories (ignore large datasets)
+data/train/
+data/test/
+
+# Outputs
+outputs/
+
+# Misc
+.DS_Store
+Thumbs.db
+.env
+*.env
