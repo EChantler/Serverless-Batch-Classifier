@@ -30,4 +30,6 @@ jobs:
       - name: Build and push Docker image to Public ECR
         run: |
           docker build -t "${{ secrets.PUBLIC_ECR_REPOSITORY }}:${{ github.sha }}" fastapi_lambda
+          docker tag "${{ secrets.PUBLIC_ECR_REPOSITORY }}:${{ github.sha }}" "${{ secrets.PUBLIC_ECR_REPOSITORY }}:latest"
           docker push "${{ secrets.PUBLIC_ECR_REPOSITORY }}:${{ github.sha }}"
+          docker push "${{ secrets.PUBLIC_ECR_REPOSITORY }}:latest"
