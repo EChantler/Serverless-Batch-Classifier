@@ -2,20 +2,60 @@ provider "aws" {
   region = var.aws_region
 }
  
-resource "aws_rds_cluster" "aurora_serverless" {
-  cluster_identifier      = "aurora-serverless-cluster"
-  engine                  = "aurora-mysql"
-  # Remove engine_mode for Aurora Serverless v2
-  master_username         = var.aurora_master_username
-  master_password         = var.aurora_master_password
-  backup_retention_period = 1
-  skip_final_snapshot     = true
+# resource "aws_rds_cluster" "aurora_serverless" {
+#   cluster_identifier      = "aurora-serverless-cluster"
+#   engine                  = "aurora-mysql"
+#   # Remove engine_mode for Aurora Serverless v2
+#   master_username         = var.aurora_master_username
+#   master_password         = var.aurora_master_password
+#   backup_retention_period = 1
+#   skip_final_snapshot     = true
 
-  # Aurora Serverless V2 requires `serverlessv2_scaling_configuration`
-  serverlessv2_scaling_configuration {
-    min_capacity = var.aurora_min_capacity
-    max_capacity = var.aurora_max_capacity
+#   # Aurora Serverless V2 requires `serverlessv2_scaling_configuration`
+#   serverlessv2_scaling_configuration {
+#     min_capacity = var.aurora_min_capacity
+#     max_capacity = var.aurora_max_capacity
+#   }
+# }
+# Add security group for DB access
+data "aws_vpc" "default" {
+  default = true
+}
+
+resource "aws_security_group" "db_sg" {
+  name        = "db-security-group"
+  description = "Allow MySQL access from anywhere"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    from_port   = 3306
+    to_port     = 3306
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow MySQL access"
   }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound"
+  }
+}
+
+resource "aws_db_instance" "db_instance" {
+  identifier             = "batch-classifier-db"
+  engine                 = "mysql"
+  engine_version         = "8.0"
+  instance_class         = "db.t3.micro"
+  allocated_storage      = 20
+  db_name                = "batchdb"
+  username               = var.aurora_master_username
+  password               = var.aurora_master_password
+  publicly_accessible    = true
+  vpc_security_group_ids = [aws_security_group.db_sg.id]
+  skip_final_snapshot    = true
 }
 
 resource "aws_s3_bucket" "lambda_bucket" {

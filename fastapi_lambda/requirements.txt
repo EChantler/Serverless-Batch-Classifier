@@ -1,3 +1,7 @@
+boto3
 fastapi
 mangum
+pydantic
+sqlalchemy
 uvicorn
+pymysql
