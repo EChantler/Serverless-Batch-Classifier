@@ -171,3 +171,13 @@ resource "aws_lambda_permission" "allow_apigw" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = aws_api_gateway_rest_api.api.execution_arn
 }
+
+resource "aws_lambda_function_url" "main_lambda_url" {
+  function_name      = aws_lambda_function.main_lambda.function_name
+  authorization_type = "NONE"
+}
+
+output "main_lambda_function_url" {
+  description = "Lambda function URL with no auth"
+  value       = aws_lambda_function_url.main_lambda_url.function_url
+}
