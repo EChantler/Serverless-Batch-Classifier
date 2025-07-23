@@ -70,27 +70,42 @@ try:
 except Exception as e:
     print(f"DB Table creation error: {e}")
 
-## Load MLflow model
+## MLflow configuration (model loaded lazily)
 mlflow.set_tracking_uri(
     os.getenv("MLFLOW_TRACKING_URI",
               f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/mlflow")
 )
-import tensorflow as tf
 
-# Load the model
+# Global model cache
 MODEL = None
-try:
-    model_name = os.getenv("MLFLOW_MODEL_NAME", "defect-classifier-model")
-    model_stage = os.getenv("MLFLOW_MODEL_STAGE", "Production")
-    model_uri = f"models:/{model_name}/{model_stage}"
-    loaded_model = mlflow.tensorflow.load_model(model_uri)
-    MODEL = loaded_model
-    print(f"Loaded model from registry: {model_uri}")
-except Exception as registry_error:
-    print(f"Failed to load from model registry ({model_uri}): {registry_error}")
+MODEL_LOADED = False
 
-if MODEL is None:
-    raise RuntimeError("Could not load model from any source")
+def get_model():
+    """Lazy load the model when first needed"""
+    global MODEL, MODEL_LOADED
+    
+    if MODEL_LOADED:
+        return MODEL
+    
+    try:
+        import tensorflow as tf
+        model_name = os.getenv("MLFLOW_MODEL_NAME", "defect-classifier-model")
+        model_stage = os.getenv("MLFLOW_MODEL_STAGE", "Production")
+        model_uri = f"models:/{model_name}/{model_stage}"
+        
+        print(f"Loading model from registry: {model_uri}")
+        loaded_model = mlflow.tensorflow.load_model(model_uri)
+        MODEL = loaded_model
+        MODEL_LOADED = True
+        print(f"Successfully loaded model from registry: {model_uri}")
+        return MODEL
+        
+    except Exception as registry_error:
+        print(f"Failed to load from model registry: {registry_error}")
+        MODEL_LOADED = True  # Mark as attempted to avoid repeated failures
+        raise RuntimeError(f"Could not load model: {registry_error}")
+    
+    return MODEL
 
 app = FastAPI()
 
@@ -113,6 +128,10 @@ async def classify_image(
     s3_key = f"uploads/{customerId}/{caseId}/image_{image_guid}.jpg"
     try:
         contents = await image.read()
+        
+        # Get model (lazy loading)
+        model = get_model()
+        
         # Perform inference
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
             tmp.write(contents)
@@ -121,7 +140,7 @@ async def classify_image(
         x = np.array(img) / 255.0
         x = np.expand_dims(x, 0)
         # Run inference via MLflow loaded model
-        predictions = MODEL.predict(x)
+        predictions = model.predict(x)
         # extract prediction score
         score = predictions[0][0] if len(predictions.shape) > 1 else predictions[0]
         label = "not defective" if score > 0.5 else "defective"
