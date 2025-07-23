@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI
 from mangum import Mangum
 from fastapi import UploadFile, File, Form
@@ -15,6 +14,12 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
 import datetime
+import mlflow
+import mlflow.tensorflow
+from mlflow.tracking import MlflowClient
+import numpy as np
+from PIL import Image
+import tempfile
 
 # Aurora MySQL connection string from env
 DB_HOST = os.getenv("DB_HOST", "batch-classifier-db.ckx6ieea6u2k.us-east-1.rds.amazonaws.com")
@@ -22,7 +27,8 @@ DB_PORT = os.getenv("DB_PORT", "3306")
 DB_USER = os.getenv("DB_USER", "admin")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "MySecurePassword123!")
 DB_NAME = os.getenv("DB_NAME", "batch_db")
-
+S3_BUCKET = os.getenv("S3_BUCKET", "serverless-batch-classifier-bucket")
+S3_REGION = os.getenv("S3_REGION", "us-east-1")
 # Ensure DB exists before SQLAlchemy engine creation
 def ensure_database_exists():
     host = DB_HOST
@@ -64,6 +70,27 @@ try:
 except Exception as e:
     print(f"DB Table creation error: {e}")
 
+## Load MLflow model
+mlflow.set_tracking_uri(
+    os.getenv("MLFLOW_TRACKING_URI",
+              f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/mlflow")
+)
+import tensorflow as tf
+
+# Load the model
+MODEL = None
+try:
+    model_name = os.getenv("MLFLOW_MODEL_NAME", "defect-classifier-model")
+    model_stage = os.getenv("MLFLOW_MODEL_STAGE", "Production")
+    model_uri = f"models:/{model_name}/{model_stage}"
+    loaded_model = mlflow.tensorflow.load_model(model_uri)
+    MODEL = loaded_model
+    print(f"Loaded model from registry: {model_uri}")
+except Exception as registry_error:
+    print(f"Failed to load from model registry ({model_uri}): {registry_error}")
+
+if MODEL is None:
+    raise RuntimeError("Could not load model from any source")
 
 app = FastAPI()
 
@@ -80,18 +107,30 @@ async def classify_image(
     customerId: str = Form(...),
     caseId: str = Form(...)
 ):
-    S3_BUCKET = os.getenv("S3_BUCKET", "serverless-batch-classifier-bucket")
-    S3_REGION = os.getenv("S3_REGION", "us-east-1")
+    
     s3_client = boto3.client("s3", region_name=S3_REGION)
     image_guid = uuid.uuid4()
     s3_key = f"uploads/{customerId}/{caseId}/image_{image_guid}.jpg"
     try:
         contents = await image.read()
+        # Perform inference
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp.write(contents)
+            tmp.flush()
+            img = Image.open(tmp.name).resize((224, 224))
+        x = np.array(img) / 255.0
+        x = np.expand_dims(x, 0)
+        # Run inference via MLflow loaded model
+        predictions = MODEL.predict(x)
+        # extract prediction score
+        score = predictions[0][0] if len(predictions.shape) > 1 else predictions[0]
+        label = "not defective" if score > 0.5 else "defective"
+        # Upload to S3
         s3_client.put_object(Bucket=S3_BUCKET, Key=s3_key, Body=contents)
         s3_url = f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{s3_key}"
     except (BotoCoreError, NoCredentialsError) as e:
         return JSONResponse({
-            "error": "Failed to upload image to S3",
+            "error": "Failed to upload image to S3 or inference error",
             "details": str(e)
         }, status_code=500)
 
@@ -104,7 +143,7 @@ async def classify_image(
             customerId=customerId,
             caseId=caseId,
             imageUrl=s3_url,
-            status="not defective",
+            status=label,
             createdOn=datetime.datetime.utcnow(),
             lastModifiedOn=datetime.datetime.utcnow(),
             createdBy="api",
@@ -120,12 +159,12 @@ async def classify_image(
         }, status_code=500)
     db.close()
 
-    result = "not defective"
     return JSONResponse({
         "uuid": record_uuid,
         "customerId": customerId,
         "caseId": caseId,
-        "classification": result,
+        "classification": label,
+        "score": float(score),
         "imageUrl": s3_url
     })
 

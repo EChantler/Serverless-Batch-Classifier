@@ -14,15 +14,26 @@ import tempfile
 import shutil
 
 class DefectClassifier:
-    def __init__(self, image_size=(224, 224), batch_size=32, experiment_name="defect-classification"):
+    def __init__(self, image_size=(224, 224), batch_size=32, experiment_name="defect-classification", artifact_uri=None):
         self.image_size = image_size
         self.batch_size = batch_size
         self.model = None
         self.history = None
         self.experiment_name = experiment_name
-        
-        # Setup MLflow
-        mlflow.set_experiment(experiment_name)
+        self.artifact_uri = artifact_uri
+        # Setup MLflow, include artifact location if provided
+        if artifact_uri:
+            # Create or update experiment with remote artifact location
+            from mlflow.exceptions import MlflowException
+            try:
+                mlflow.create_experiment(experiment_name, artifact_location=artifact_uri)
+            except MlflowException:
+                # Experiment already exists
+                pass
+            # Set the experiment for tracking
+            mlflow.set_experiment(experiment_name)
+        else:
+            mlflow.set_experiment(experiment_name)
         
     def start_mlflow_run(self, run_name=None):
         """Start an MLflow run"""
@@ -96,7 +107,7 @@ class DefectClassifier:
         
         return train_generator, validation_generator
     
-    def train(self, data_dir, epochs=10, run_name=None):
+    def train(self, data_dir, epochs=3, run_name=None):
         """Train the model with MLflow tracking"""
         if self.model is None:
             self.create_model()
@@ -137,7 +148,7 @@ class DefectClassifier:
             )
             
             model_checkpoint = keras.callbacks.ModelCheckpoint(
-                'best_defect_model.h5',
+                'best_defect_model.keras',
                 monitor='val_loss',
                 save_best_only=True
             )
@@ -164,7 +175,31 @@ class DefectClassifier:
             mlflow.log_metric("final_val_accuracy", final_val_acc)
             
             # Log model
-            mlflow.tensorflow.log_model(self.model, "model")
+            model_info = mlflow.tensorflow.log_model(self.model, "model")
+            
+            # Register the model in MLflow Model Registry
+            model_name = "defect-classifier-model"
+            try:
+                # Register the model
+                registered_model = mlflow.register_model(
+                    model_uri=model_info.model_uri,
+                    name=model_name
+                )
+                print(f"Model registered as '{model_name}' version {registered_model.version}")
+                
+                # Optionally transition to Production stage
+                from mlflow.tracking import MlflowClient
+                client = MlflowClient()
+                client.transition_model_version_stage(
+                    name=model_name,
+                    version=registered_model.version,
+                    stage="Production"
+                )
+                print(f"Model version {registered_model.version} transitioned to Production stage")
+                
+            except Exception as e:
+                print(f"Warning: Model registration failed: {e}")
+                print("Model was logged to run but not registered in Model Registry")
             
             # Save and log training history plot
             if self.history:
@@ -318,64 +353,17 @@ class DefectClassifier:
 
 def create_sample_data_structure():
     """Create sample data directory structure"""
-    base_dir = "sample_data"
+    base_dir = "data/train"
     
     # Create directories
     os.makedirs(f"{base_dir}/defective", exist_ok=True)
-    os.makedirs(f"{base_dir}/not_defective", exist_ok=True)
+    os.makedirs(f"{base_dir}/normal", exist_ok=True)
     
     print(f"Created sample data structure:")
     print(f"  {base_dir}/")
     print(f"    defective/")
-    print(f"    not_defective/")
+    print(f"    normal/")
     print(f"\nPlace your training images in these folders:")
     print(f"- Put defective images in '{base_dir}/defective/'")
-    print(f"- Put non-defective images in '{base_dir}/not_defective/'")
+    print(f"- Put normal images in '{base_dir}/normal/'")
 
-def main():
-    """Main training function"""
-    # Create sample data structure
-    create_sample_data_structure()
-    
-    # Check if data exists
-    data_dir = "sample_data"
-    if not os.path.exists(data_dir):
-        print(f"Data directory '{data_dir}' not found. Please create it and add your images.")
-        return
-    
-    # Count images in each class
-    defective_count = len(os.listdir(f"{data_dir}/defective")) if os.path.exists(f"{data_dir}/defective") else 0
-    not_defective_count = len(os.listdir(f"{data_dir}/not_defective")) if os.path.exists(f"{data_dir}/not_defective") else 0
-    
-    print(f"Found {defective_count} defective images")
-    print(f"Found {not_defective_count} non-defective images")
-    
-    if defective_count == 0 or not_defective_count == 0:
-        print("Please add images to both 'defective' and 'not_defective' folders before training.")
-        return
-    
-    # Initialize classifier
-    classifier = DefectClassifier(image_size=(224, 224), batch_size=32)
-    
-    # Create and compile model
-    model = classifier.create_model()
-    print("Model architecture:")
-    model.summary()
-    
-    # Train the model
-    print("\nStarting training...")
-    history = classifier.train(data_dir, epochs=20)
-    
-    # Plot training history
-    classifier.plot_training_history()
-    
-    # Save the model
-    classifier.save_model("defect_classifier_model.h5")
-    
-    # Example of how to use the trained model
-    print("\nTraining completed!")
-    print("To use the model for prediction:")
-    print("classifier.predict_single_image('path/to/your/image.jpg')")
-
-if __name__ == "__main__":
-    main()
