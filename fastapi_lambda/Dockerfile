@@ -7,6 +7,10 @@ ENV TF_ENABLE_ONEDNN_OPTS=0
 ENV CUDA_VISIBLE_DEVICES=""
 ENV PYTHONUNBUFFERED=1
 
+# Set MLflow environment variables
+ENV MLFLOW_DEFAULT_ARTIFACT_ROOT=/tmp/mlflow-artifacts
+ENV MLFLOW_ARTIFACT_ROOT=/tmp/mlflow-artifacts
+
 # Copy requirements and install
 COPY requirements.txt ${LAMBDA_TASK_ROOT}
 RUN pip install --no-cache-dir -r requirements.txt

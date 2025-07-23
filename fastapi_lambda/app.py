@@ -71,10 +71,12 @@ except Exception as e:
     print(f"DB Table creation error: {e}")
 
 ## MLflow configuration (model loaded lazily)
-mlflow.set_tracking_uri(
-    os.getenv("MLFLOW_TRACKING_URI",
-              f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/mlflow")
-)
+# Set MLflow to use /tmp for local artifacts (writable in Lambda)
+os.environ["MLFLOW_TRACKING_URI"] = os.getenv("MLFLOW_TRACKING_URI", 
+                                              f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/mlflow")
+os.environ["MLFLOW_DEFAULT_ARTIFACT_ROOT"] = "/tmp/mlflow-artifacts"
+
+mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
 
 # Global model cache
 MODEL = None
@@ -89,16 +91,24 @@ def get_model():
     
     try:
         import tensorflow as tf
+        
+        # Ensure /tmp/mlflow-artifacts exists
+        artifact_dir = "/tmp/mlflow-artifacts"
+        os.makedirs(artifact_dir, exist_ok=True)
+        
         model_name = os.getenv("MLFLOW_MODEL_NAME", "defect-classifier-model")
         model_stage = os.getenv("MLFLOW_MODEL_STAGE", "Production")
         model_uri = f"models:/{model_name}/{model_stage}"
         
         print(f"Loading model from registry: {model_uri}")
-        loaded_model = mlflow.tensorflow.load_model(model_uri)
-        MODEL = loaded_model
-        MODEL_LOADED = True
-        print(f"Successfully loaded model from registry: {model_uri}")
-        return MODEL
+        
+        # Set temporary directory for model downloads
+        with tempfile.TemporaryDirectory(dir="/tmp") as temp_dir:
+            loaded_model = mlflow.tensorflow.load_model(model_uri, dst_path=temp_dir)
+            MODEL = loaded_model
+            MODEL_LOADED = True
+            print(f"Successfully loaded model from registry: {model_uri}")
+            return MODEL
         
     except Exception as registry_error:
         print(f"Failed to load from model registry: {registry_error}")

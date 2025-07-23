@@ -101,7 +101,8 @@ resource "aws_lambda_function" "main_lambda" {
   package_type  = "Image"
   image_uri     = var.lambda_image_uri
   role          = aws_iam_role.lambda_exec_role.arn
-  timeout       = 60
+  timeout       = 600
+  memory_size   = 1024
   
   # Specify architecture for container images
   architectures = ["x86_64"]
