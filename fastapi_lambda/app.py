@@ -59,6 +59,7 @@ class BatchRecord(Base):
     caseId = Column(String(64))
     imageUrl = Column(String(512))
     status = Column(String(32))
+    modelVersion = Column(String(32))
     createdOn = Column(DateTime, default=datetime.datetime.utcnow)
     lastModifiedOn = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     createdBy = Column(String(64))
@@ -75,62 +76,109 @@ except Exception as e:
 os.environ["MLFLOW_TRACKING_URI"] = os.getenv("MLFLOW_TRACKING_URI", 
                                               f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/mlflow")
 os.environ["MLFLOW_DEFAULT_ARTIFACT_ROOT"] = "/tmp/mlflow-artifacts"
+os.environ["MLFLOW_ARTIFACT_ROOT"] = "/tmp/mlflow-artifacts"
 
+# Prevent MLflow from creating ./mlruns directory
+import tempfile
+os.environ["TMPDIR"] = "/tmp"
+os.environ["TMP"] = "/tmp"
+os.environ["TEMP"] = "/tmp"
+
+# Initialize MLflow with explicit tracking URI
 mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
 
 # Global model cache
 MODEL = None
 MODEL_LOADED = False
+MODEL_VERSION = None
 
 def get_model():
     """Lazy load the model when first needed"""
-    global MODEL, MODEL_LOADED
+    global MODEL, MODEL_LOADED, MODEL_VERSION
     
     if MODEL_LOADED and MODEL is not None:
-        return MODEL
+        return MODEL, MODEL_VERSION
     
     try:
         import tensorflow as tf
         
-        # Ensure /tmp/mlflow-artifacts exists
-        artifact_dir = "/tmp/mlflow-artifacts"
-        os.makedirs(artifact_dir, exist_ok=True)
+        # Set additional environment variables to prevent MLflow from using local directories
+        os.environ["MLFLOW_TRACKING_URI"] = os.getenv("MLFLOW_TRACKING_URI", 
+                                                      f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/mlflow")
         
         model_name = os.getenv("MLFLOW_MODEL_NAME", "defect-classifier-model")
         model_stage = os.getenv("MLFLOW_MODEL_STAGE", "Production")
-        model_uri = f"models:/{model_name}/{model_stage}"
         
-        print(f"Loading model from registry: {model_uri}")
+        print(f"Attempting to load model: {model_name} from stage: {model_stage}")
         
-        # Create a persistent directory for model storage in /tmp
-        model_dir = "/tmp/loaded_model"
-        os.makedirs(model_dir, exist_ok=True)
+        # Try to get model version info first
+        try:
+            client = MlflowClient(tracking_uri=os.environ["MLFLOW_TRACKING_URI"])
+            model_version_info = client.get_latest_versions(model_name, stages=[model_stage])
+            if model_version_info:
+                MODEL_VERSION = model_version_info[0].version
+                model_uri = f"models:/{model_name}/{MODEL_VERSION}"
+                print(f"Found model version: {MODEL_VERSION}")
+            else:
+                MODEL_VERSION = "unknown"
+                model_uri = f"models:/{model_name}/{model_stage}"
+                print(f"Could not find specific version, using stage: {model_stage}")
+        except Exception as version_error:
+            print(f"Could not get model version info: {version_error}")
+            MODEL_VERSION = "unknown"
+            model_uri = f"models:/{model_name}/{model_stage}"
         
-        # Load model directly to persistent directory
-        loaded_model = mlflow.tensorflow.load_model(model_uri, dst_path=model_dir)
-        MODEL = loaded_model
-        MODEL_LOADED = True
-        print(f"Successfully loaded model from registry: {model_uri}")
-        return MODEL
+        print(f"Loading model from URI: {model_uri}")
+        
+        # Create writable temp directory for MLflow
+        temp_model_dir = f"/tmp/mlflow_model_{uuid.uuid4().hex[:8]}"
+        os.makedirs(temp_model_dir, exist_ok=True)
+        
+        # Set MLflow to use our temp directory
+        original_cwd = os.getcwd()
+        try:
+            os.chdir("/tmp")  # Change to writable directory
+            
+            # Override MLflow's default artifact root
+            import mlflow.store.artifact.utils.models
+            
+            loaded_model = mlflow.tensorflow.load_model(model_uri)
+            MODEL = loaded_model
+            MODEL_LOADED = True
+            print(f"Successfully loaded model from registry: {model_uri}")
+            return MODEL, MODEL_VERSION
+            
+        finally:
+            os.chdir(original_cwd)  # Restore original directory
         
     except Exception as registry_error:
         print(f"Failed to load from model registry: {registry_error}")
         
-        # Try fallback approach - load directly without dst_path
+        # Try alternative approach with direct S3 model loading if available
         try:
-            print("Attempting fallback model loading...")
-            loaded_model = mlflow.tensorflow.load_model(model_uri)
-            MODEL = loaded_model
-            MODEL_LOADED = True
-            print("Successfully loaded model using fallback method")
-            return MODEL
+            print("Attempting alternative model loading approach...")
+            
+            # Check if we have a backup model in S3 or local fallback
+            fallback_model_path = os.getenv("FALLBACK_MODEL_PATH")
+            if fallback_model_path:
+                print(f"Trying fallback model path: {fallback_model_path}")
+                # This would need to be implemented based on your backup strategy
+                # For now, we'll just set a basic fallback
+                MODEL_VERSION = "fallback"
+            else:
+                MODEL_LOADED = True  # Mark as attempted to avoid repeated failures
+                MODEL = None
+                MODEL_VERSION = "failed"
+                raise RuntimeError(f"Could not load model and no fallback available. Error: {registry_error}")
+                
         except Exception as fallback_error:
-            print(f"Fallback loading also failed: {fallback_error}")
+            print(f"All loading methods failed: {fallback_error}")
             MODEL_LOADED = True  # Mark as attempted to avoid repeated failures
             MODEL = None
+            MODEL_VERSION = "failed"
             raise RuntimeError(f"Could not load model. Registry error: {registry_error}, Fallback error: {fallback_error}")
     
-    return MODEL
+    return MODEL, MODEL_VERSION
 
 app = FastAPI()
 
@@ -155,7 +203,7 @@ async def classify_image(
         contents = await image.read()
         
         # Get model (lazy loading)
-        model = get_model()
+        model, model_version = get_model()
         
         if model is None:
             return JSONResponse({
@@ -204,6 +252,7 @@ async def classify_image(
             caseId=caseId,
             imageUrl=s3_url,
             status=label,
+            modelVersion=model_version,
             createdOn=datetime.datetime.utcnow(),
             lastModifiedOn=datetime.datetime.utcnow(),
             createdBy="api",
@@ -225,6 +274,7 @@ async def classify_image(
         "caseId": caseId,
         "classification": label,
         "score": float(score),
+        "modelVersion": model_version,
         "imageUrl": s3_url
     })
 

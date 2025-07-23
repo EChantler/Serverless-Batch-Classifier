@@ -7,9 +7,12 @@ ENV TF_ENABLE_ONEDNN_OPTS=0
 ENV CUDA_VISIBLE_DEVICES=""
 ENV PYTHONUNBUFFERED=1
 
-# Set MLflow environment variables
+# Set MLflow environment variables to prevent local directory creation
 ENV MLFLOW_DEFAULT_ARTIFACT_ROOT=/tmp/mlflow-artifacts
 ENV MLFLOW_ARTIFACT_ROOT=/tmp/mlflow-artifacts
+ENV TMPDIR=/tmp
+ENV TMP=/tmp
+ENV TEMP=/tmp
 
 # Copy requirements and install
 COPY requirements.txt ${LAMBDA_TASK_ROOT}
