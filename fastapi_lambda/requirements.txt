@@ -6,3 +6,7 @@ pydantic
 sqlalchemy
 uvicorn
 pymysql
+mlflow
+tensorflow
+pillow
+numpy
