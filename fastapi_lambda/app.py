@@ -86,7 +86,7 @@ def get_model():
     """Lazy load the model when first needed"""
     global MODEL, MODEL_LOADED
     
-    if MODEL_LOADED:
+    if MODEL_LOADED and MODEL is not None:
         return MODEL
     
     try:
@@ -102,18 +102,33 @@ def get_model():
         
         print(f"Loading model from registry: {model_uri}")
         
-        # Set temporary directory for model downloads
-        with tempfile.TemporaryDirectory(dir="/tmp") as temp_dir:
-            loaded_model = mlflow.tensorflow.load_model(model_uri, dst_path=temp_dir)
-            MODEL = loaded_model
-            MODEL_LOADED = True
-            print(f"Successfully loaded model from registry: {model_uri}")
-            return MODEL
+        # Create a persistent directory for model storage in /tmp
+        model_dir = "/tmp/loaded_model"
+        os.makedirs(model_dir, exist_ok=True)
+        
+        # Load model directly to persistent directory
+        loaded_model = mlflow.tensorflow.load_model(model_uri, dst_path=model_dir)
+        MODEL = loaded_model
+        MODEL_LOADED = True
+        print(f"Successfully loaded model from registry: {model_uri}")
+        return MODEL
         
     except Exception as registry_error:
         print(f"Failed to load from model registry: {registry_error}")
-        MODEL_LOADED = True  # Mark as attempted to avoid repeated failures
-        raise RuntimeError(f"Could not load model: {registry_error}")
+        
+        # Try fallback approach - load directly without dst_path
+        try:
+            print("Attempting fallback model loading...")
+            loaded_model = mlflow.tensorflow.load_model(model_uri)
+            MODEL = loaded_model
+            MODEL_LOADED = True
+            print("Successfully loaded model using fallback method")
+            return MODEL
+        except Exception as fallback_error:
+            print(f"Fallback loading also failed: {fallback_error}")
+            MODEL_LOADED = True  # Mark as attempted to avoid repeated failures
+            MODEL = None
+            raise RuntimeError(f"Could not load model. Registry error: {registry_error}, Fallback error: {fallback_error}")
     
     return MODEL
 
@@ -142,6 +157,12 @@ async def classify_image(
         # Get model (lazy loading)
         model = get_model()
         
+        if model is None:
+            return JSONResponse({
+                "error": "Model not loaded",
+                "details": "Failed to load ML model for inference"
+            }, status_code=500)
+        
         # Perform inference
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
             tmp.write(contents)
@@ -157,9 +178,19 @@ async def classify_image(
         # Upload to S3
         s3_client.put_object(Bucket=S3_BUCKET, Key=s3_key, Body=contents)
         s3_url = f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{s3_key}"
+    except RuntimeError as model_error:
+        return JSONResponse({
+            "error": "Model loading error",
+            "details": str(model_error)
+        }, status_code=500)
     except (BotoCoreError, NoCredentialsError) as e:
         return JSONResponse({
             "error": "Failed to upload image to S3 or inference error",
+            "details": str(e)
+        }, status_code=500)
+    except Exception as e:
+        return JSONResponse({
+            "error": "Unexpected error during classification",
             "details": str(e)
         }, status_code=500)
 
